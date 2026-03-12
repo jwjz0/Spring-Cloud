@@ -1,0 +1,40 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        ip: 127.0.0.1
+        prefer-ip-address: true
+    gateway:
+      # 路由配置 - 面试考点：Route = Predicate + Filter + URI
+      routes:
+        # 用户服务
+        - id: user-service
+          uri: lb://user-service          # lb:// 表示从 Nacos 负载均衡
+          predicates:
+            - Path=/api/user/**           # 路径匹配断言
+        # 商品服务
+        - id: product-service
+          uri: lb://product-service
+          predicates:
+            - Path=/api/product/**
+        # 订单服务
+        - id: order-service
+          uri: lb://order-service
+          predicates:
+            - Path=/api/order/**
+        # 支付服务
+        - id: pay-service
+          uri: lb://pay-service
+          predicates:
+            - Path=/api/pay/**
+        # 管理后台
+        - id: admin-service
+          uri: lb://order-service
+          predicates:
+            - Path=/api/admin/**

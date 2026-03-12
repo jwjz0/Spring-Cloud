@@ -1,0 +1,28 @@
+# Java build
+**/target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Logs & PIDs
+**/logs/
+**/*.log
+**/*.pid
+.run/
+
+# Node
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
