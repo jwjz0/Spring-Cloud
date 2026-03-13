@@ -348,6 +348,37 @@ public class OrderService {
     }
 
     /**
+     * 用户主动取消订单（仅 PENDING / PAY_FAILED 状态可取消）
+     */
+    public void cancelOrder(Long userId, Long orderId) {
+        long stepStart = System.currentTimeMillis();
+        Order order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new RuntimeException("订单不存在");
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new RuntimeException("无权操作该订单");
+        }
+        int status = order.getStatus();
+        if (status != Order.STATUS_PENDING && status != Order.STATUS_PAY_FAILED) {
+            throw new RuntimeException("当前状态不允许取消：" + statusName(status));
+        }
+
+        order.setStatus(Order.STATUS_CLOSED);
+        order.setUpdateTime(LocalDateTime.now());
+        orderMapper.updateById(order);
+
+        // 恢复库存
+        productFeignClient.restoreStock(order.getProductId(), order.getQuantity());
+
+        appendSingleStep(orderId, "order-service", "用户主动取消订单并回滚库存", "订单状态机 + Feign",
+                String.format("用户取消订单，状态 %s → CLOSED，已恢复库存 productId=%s, quantity=%s",
+                        statusName(status), order.getProductId(), order.getQuantity()),
+                "success", System.currentTimeMillis(), System.currentTimeMillis() - stepStart);
+        log.info("用户取消订单, orderId={}, userId={}", orderId, userId);
+    }
+
+    /**
      * 管理后台统计数据
      */
     public Map<String, Object> getDashboardStats() {

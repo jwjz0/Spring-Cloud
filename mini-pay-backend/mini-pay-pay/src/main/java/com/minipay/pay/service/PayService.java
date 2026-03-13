@@ -314,30 +314,32 @@ public class PayService {
                         e.getMessage(), "warn", System.currentTimeMillis(), System.currentTimeMillis() - stepStart);
             }
 
-            // RocketMQ 通知 + Feign 降级
+            // Feign 同步更新订单状态（主路径）
+            stepStart = System.currentTimeMillis();
+            try {
+                orderFeignClient.markPaid(orderId, req.getChannelTxnNo());
+                result.addStep("pay-service → order-service", "Feign 调用 markPaid 成功", "OpenFeign",
+                        String.format("orderId=%s, channelTxnNo=%s", orderId, req.getChannelTxnNo()),
+                        "success", System.currentTimeMillis(), System.currentTimeMillis() - stepStart);
+            } catch (Exception e) {
+                log.warn("Feign 调用 markPaid 失败, orderId={}, error={}", orderId, e.getMessage());
+                result.addStep("pay-service → order-service", "Feign 调用 markPaid 失败", "OpenFeign",
+                        e.getMessage(), "warn", System.currentTimeMillis(), System.currentTimeMillis() - stepStart);
+            }
+
+            // RocketMQ 异步通知（用于其他消费者，如通知服务）
             stepStart = System.currentTimeMillis();
             try {
                 String mqMsg = String.format("{\"orderId\":%s,\"payId\":%s,\"channelTxnNo\":\"%s\"}",
                         orderId, payRecord.getId(), req.getChannelTxnNo());
                 rocketMQTemplate.convertAndSend("pay-result-topic", mqMsg);
-                result.addStep("pay-service → RocketMQ", "发送支付结果消息", "RocketMQ",
+                result.addStep("pay-service → RocketMQ", "发送支付结果消息（异步通知）", "RocketMQ",
                         String.format("topic=pay-result-topic, orderId=%s", orderId),
                         "success", System.currentTimeMillis(), System.currentTimeMillis() - stepStart);
             } catch (Exception e) {
-                log.warn("RocketMQ 发送失败，降级为 Feign 调用, orderId={}, error={}", orderId, e.getMessage());
-                result.addStep("pay-service → RocketMQ", "MQ 发送失败，降级 Feign", "RocketMQ 降级",
+                log.warn("RocketMQ 发送失败（不影响主流程）, orderId={}, error={}", orderId, e.getMessage());
+                result.addStep("pay-service → RocketMQ", "MQ 发送失败（不影响主流程）", "RocketMQ",
                         e.getMessage(), "warn", System.currentTimeMillis(), System.currentTimeMillis() - stepStart);
-                stepStart = System.currentTimeMillis();
-                try {
-                    orderFeignClient.markPaid(orderId, req.getChannelTxnNo());
-                    result.addStep("pay-service → order-service", "Feign 降级调用 markPaid 成功", "OpenFeign",
-                            String.format("orderId=%s", orderId),
-                            "success", System.currentTimeMillis(), System.currentTimeMillis() - stepStart);
-                } catch (Exception ex) {
-                    log.error("Feign 降级调用 markPaid 也失败, orderId={}, error={}", orderId, ex.getMessage());
-                    result.addStep("pay-service → order-service", "Feign 降级调用 markPaid 失败", "OpenFeign",
-                            ex.getMessage(), "fail", System.currentTimeMillis(), System.currentTimeMillis() - stepStart);
-                }
             }
         }
 

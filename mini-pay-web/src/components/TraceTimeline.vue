@@ -24,7 +24,7 @@ function serviceColor(service: string) {
   if (service.includes('gateway')) return '#409eff'
   if (service.includes('order')) return '#67c23a'
   if (service.includes('product')) return '#e6a23c'
-  if (service.includes('pay')) return '#f56c6c'
+  if (service.includes('pay')) return '#9b59b6'
   if (service.includes('RocketMQ')) return '#909399'
   if (service.includes('Kafka')) return '#b37feb'
   return '#409eff'

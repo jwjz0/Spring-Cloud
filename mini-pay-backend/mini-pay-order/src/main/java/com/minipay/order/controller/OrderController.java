@@ -44,6 +44,16 @@ public class OrderController {
     }
 
     /**
+     * 用户主动取消订单
+     */
+    @PostMapping("/cancel/{id}")
+    public R<Void> cancel(@PathVariable("id") Long orderId,
+                          @RequestHeader("X-User-Id") Long userId) {
+        orderService.cancelOrder(userId, orderId);
+        return R.ok();
+    }
+
+    /**
      * 内部接口：标记订单已支付（被支付服务通过 Feign 调用）
      * 面试考点：MQ 不可用时的降级方案 —— 同步 Feign 调用兜底
      */

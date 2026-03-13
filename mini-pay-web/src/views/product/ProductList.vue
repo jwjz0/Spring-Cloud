@@ -40,6 +40,19 @@ type CompareResult = {
   avgDrop: number
 }
 
+type CompareMetric = {
+  key: string
+  label: string
+  unit: string
+  serial: number
+  concurrent: number
+  better: 'higher' | 'lower'
+  serialWidth: string
+  concurrentWidth: string
+  deltaText: string
+  winner: 'serial' | 'concurrent' | 'tie'
+}
+
 type TrendRow = {
   concurrency: number
   elapsedMs: number
@@ -114,6 +127,44 @@ const trendMaxElapsed = computed(() => Math.max(1, ...trendResults.value.map((it
 const toolLocked = computed(
   () => pressureLoading.value || compareLoading.value || trendLoading.value || resetLoading.value
 )
+const compareMetrics = computed<CompareMetric[]>(() => {
+  if (!compareResult.value) return []
+  const rows = [
+    { key: 'elapsed', label: '总耗时', unit: 'ms', serial: compareResult.value.serial.elapsedMs, concurrent: compareResult.value.concurrent.elapsedMs, better: 'lower' as const },
+    { key: 'qps', label: 'QPS', unit: '', serial: compareResult.value.serial.qps, concurrent: compareResult.value.concurrent.qps, better: 'higher' as const },
+    { key: 'avg', label: '平均耗时', unit: 'ms', serial: compareResult.value.serial.avgMs, concurrent: compareResult.value.concurrent.avgMs, better: 'lower' as const },
+    { key: 'p95', label: 'P95', unit: 'ms', serial: compareResult.value.serial.p95Ms, concurrent: compareResult.value.concurrent.p95Ms, better: 'lower' as const },
+  ]
+
+  return rows.map((row) => {
+    const max = Math.max(row.serial, row.concurrent, 1)
+    const serialWin = row.better === 'lower' ? row.serial < row.concurrent : row.serial > row.concurrent
+    const concurrentWin = row.better === 'lower' ? row.concurrent < row.serial : row.concurrent > row.serial
+    const diffValue = Math.abs(row.concurrent - row.serial)
+    const diffPercent =
+      row.serial > 0 ? round((diffValue / row.serial) * 100, 1) : 0
+    return {
+      ...row,
+      serialWidth: metricWidth(row.serial, max),
+      concurrentWidth: metricWidth(row.concurrent, max),
+      deltaText:
+        row.unit === 'ms'
+          ? `${diffValue}ms / ${diffPercent}%`
+          : `${round(diffValue, 2)} / ${diffPercent}%`,
+      winner: concurrentWin ? 'concurrent' : serialWin ? 'serial' : 'tie',
+    }
+  })
+})
+const compareConclusion = computed(() => {
+  if (!compareResult.value) return ''
+  if (compareResult.value.speedup >= 2) {
+    return '并发模式已经明显拉开差距，当前场景下吞吐优势比较直观。'
+  }
+  if (compareResult.value.speedup >= 1.3) {
+    return '并发模式有一定优势，但还没有到特别夸张的程度。'
+  }
+  return '当前差距偏小，通常是因为请求量较少、并发量不高，或者接口本身响应很快。'
+})
 const pressurePhaseText = computed(() => {
   const phase = pressureProgress.value?.phase
   if (phase === 'creating') return '下单中'
@@ -413,6 +464,10 @@ function metricWidth(value: number, max: number) {
   if (value <= 0 || max <= 0) return '0%'
   const percent = (value / max) * 100
   return `${Math.max(6, Math.min(100, round(percent, 1)))}%`
+}
+
+function formatMetricValue(value: number, unit: string) {
+  return unit ? `${value}${unit}` : String(value)
 }
 
 function resetPressureRecords() {
@@ -791,7 +846,7 @@ async function handleViewPressureTrace(orderId: string) {
           <div class="tool-block-title">测试操作</div>
           <div class="tool-row">
             <el-button type="primary" :loading="pressureLoading" :disabled="toolLocked" @click="handleConcurrentTest">
-              并发压测（流式）
+              并发压测
             </el-button>
             <el-button type="success" :loading="compareLoading" :disabled="toolLocked" @click="handleCompareTest">
               串并对比
@@ -839,13 +894,20 @@ async function handleViewPressureTrace(orderId: string) {
             <el-progress :percentage="payProgressPercent" :stroke-width="12" color="#67c23a" />
           </div>
         </div>
-        <div class="tool-tip">表格为流式刷新，每个请求完成后立即显示或更新。</div>
+        <div class="tool-tip">表格会实时刷新，每个请求完成后立即显示或更新。</div>
       </el-card>
 
       <el-card v-if="compareResult" class="compare-card" shadow="never">
         <template #header>
           <div class="test-panel-header">并发收益对比</div>
         </template>
+        <div class="compare-hero">
+          <div class="compare-badge">{{ compareResult.speedup }}x</div>
+          <div class="compare-hero-text">
+            <div class="compare-hero-title">串行 vs 并发</div>
+            <div class="compare-hero-desc">{{ compareConclusion }}</div>
+          </div>
+        </div>
         <div class="compare-grid">
           <div class="compare-item">串行耗时：{{ compareResult.serial.elapsedMs }}ms</div>
           <div class="compare-item">并发耗时：{{ compareResult.concurrent.elapsedMs }}ms</div>
@@ -853,7 +915,40 @@ async function handleViewPressureTrace(orderId: string) {
           <div class="compare-item">QPS 提升：{{ compareResult.qpsImprove }}%</div>
           <div class="compare-item">平均时延下降：{{ compareResult.avgDrop }}%</div>
           <div class="compare-item">并发 QPS：{{ compareResult.concurrent.qps }}</div>
+          <div class="compare-item">串行 P95：{{ compareResult.serial.p95Ms }}ms</div>
+          <div class="compare-item">并发 P95：{{ compareResult.concurrent.p95Ms }}ms</div>
         </div>
+        <div class="compare-metrics">
+          <div v-for="metric in compareMetrics" :key="metric.key" class="compare-metric-card">
+            <div class="compare-metric-head">
+              <div class="compare-metric-title">{{ metric.label }}</div>
+              <div class="compare-metric-delta">差值：{{ metric.deltaText }}</div>
+            </div>
+            <div class="compare-bar-line">
+              <span class="compare-bar-label">串行</span>
+              <div class="compare-bar-track">
+                <div
+                  class="compare-bar-fill compare-bar-serial"
+                  :class="{ winner: metric.winner === 'serial' }"
+                  :style="{ width: metric.serialWidth }"
+                ></div>
+              </div>
+              <span class="compare-bar-value">{{ formatMetricValue(metric.serial, metric.unit) }}</span>
+            </div>
+            <div class="compare-bar-line">
+              <span class="compare-bar-label">并发</span>
+              <div class="compare-bar-track">
+                <div
+                  class="compare-bar-fill compare-bar-concurrent"
+                  :class="{ winner: metric.winner === 'concurrent' }"
+                  :style="{ width: metric.concurrentWidth }"
+                ></div>
+              </div>
+              <span class="compare-bar-value">{{ formatMetricValue(metric.concurrent, metric.unit) }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="tool-tip compare-tip">如果差距不明显，建议把请求数调到 50~100，并把并发量调到 10~20 再看对比。</div>
       </el-card>
 
       <el-card v-if="trendResults.length > 0" class="trend-card" shadow="never">
@@ -1095,10 +1190,53 @@ async function handleViewPressureTrace(orderId: string) {
   margin-top: 12px;
 }
 
+.compare-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 14px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f0f9ff, #f4f4ff);
+}
+
+.compare-badge {
+  min-width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #409eff, #67c23a);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(64, 158, 255, 0.18);
+}
+
+.compare-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compare-hero-title {
+  color: #303133;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.compare-hero-desc {
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .compare-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
+  margin-bottom: 12px;
 }
 
 .compare-item {
@@ -1107,6 +1245,88 @@ async function handleViewPressureTrace(orderId: string) {
   padding: 8px 10px;
   font-size: 13px;
   color: #303133;
+}
+
+.compare-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.compare-metric-card {
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+}
+
+.compare-metric-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.compare-metric-title {
+  color: #303133;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.compare-metric-delta {
+  color: #909399;
+  font-size: 12px;
+}
+
+.compare-bar-line {
+  display: grid;
+  grid-template-columns: 36px 1fr 78px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.compare-bar-label {
+  color: #606266;
+  font-size: 12px;
+}
+
+.compare-bar-track {
+  height: 10px;
+  background: #ebeef5;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.compare-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  opacity: 0.78;
+  transition: width 0.25s ease;
+}
+
+.compare-bar-fill.winner {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.66) inset;
+}
+
+.compare-bar-serial {
+  background: linear-gradient(90deg, #e6a23c, #f3d19e);
+}
+
+.compare-bar-concurrent {
+  background: linear-gradient(90deg, #67c23a, #95d475);
+}
+
+.compare-bar-value {
+  color: #303133;
+  font-size: 12px;
+  text-align: right;
+}
+
+.compare-tip {
+  margin-top: 10px;
 }
 
 .trend-card {

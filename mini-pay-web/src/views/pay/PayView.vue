@@ -51,7 +51,7 @@ async function handlePay() {
       currentPayRecord.value = traceData.data
     }
     payStatus.value = 'waiting'
-    ElMessage.info('支付单已创建，等待渠道回调')
+    ElMessage.info('支付单已创建，订单会先进入支付中，需模拟渠道回调后才会变成已支付')
   } catch {
     payStatus.value = 'fail'
     ElMessage.error('支付单创建失败')
@@ -127,6 +127,9 @@ function goOrderList() {
           </el-button>
         </template>
       </el-result>
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
+        <template #title>当前点击“确认支付”只会创建支付单；收到成功回调后，订单状态才会更新为已支付。</template>
+      </el-alert>
       <TraceTimeline v-if="payTrace.length > 0" title="支付创建调用链路" :steps="payTrace" />
     </template>
 

@@ -1,5 +1,7 @@
 package com.minipay.order.mq;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minipay.order.service.OrderService;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
@@ -26,19 +28,41 @@ public class PayResultListener implements RocketMQListener<String> {
     private static final Logger log = LoggerFactory.getLogger(PayResultListener.class);
 
     private final OrderService orderService;
+    private final ObjectMapper objectMapper;
 
-    public PayResultListener(OrderService orderService) {
+    public PayResultListener(OrderService orderService, ObjectMapper objectMapper) {
         this.orderService = orderService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
-    public void onMessage(String orderId) {
-        log.info("收到支付成功消息, orderId={}", orderId);
+    public void onMessage(String payload) {
+        log.info("收到支付成功消息, payload={}", payload);
         try {
-            orderService.markAsPaidByMq(Long.parseLong(orderId));
+            orderService.markAsPaidByMq(extractOrderId(payload));
         } catch (Exception e) {
-            log.error("处理支付结果失败, orderId={}", orderId, e);
+            log.error("处理支付结果失败, payload={}", payload, e);
             throw e;
         }
+    }
+
+    private Long extractOrderId(String payload) {
+        if (payload == null || payload.isBlank()) {
+            throw new IllegalArgumentException("支付结果消息为空");
+        }
+        String trimmed = payload.trim();
+        if (trimmed.startsWith("{")) {
+            try {
+                JsonNode root = objectMapper.readTree(trimmed);
+                JsonNode orderIdNode = root.get("orderId");
+                if (orderIdNode == null || orderIdNode.isNull()) {
+                    throw new IllegalArgumentException("支付结果消息缺少 orderId");
+                }
+                return orderIdNode.asLong();
+            } catch (Exception e) {
+                throw new IllegalArgumentException("支付结果消息解析失败: " + trimmed, e);
+            }
+        }
+        return Long.parseLong(trimmed);
     }
 }

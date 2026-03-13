@@ -108,6 +108,16 @@ async function handleMockCallback(orderId: string, type: 'success' | 'fail') {
   }
 }
 
+async function handleCancel(orderId: string) {
+  try {
+    await orderApi.cancel(orderId)
+    ElMessage.success('订单已取消')
+    await refreshOrders()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '取消失败')
+  }
+}
+
 async function handleMockRefundCallback(orderId: string, type: 'success' | 'fail') {
   try {
     await payApi.mockRefundCallback(orderId, type)
@@ -140,6 +150,9 @@ async function handleMockRefundCallback(orderId: string, type: 'success' | 'fail
         <template #default="{ row }">
           <el-button v-if="row.statusKey === 'pending'" type="primary" size="small" @click="handlePay(row.id)">
             去支付
+          </el-button>
+          <el-button v-if="row.statusKey === 'pending' || row.statusKey === 'payFailed'" type="danger" size="small" @click="handleCancel(row.id)">
+            取消订单
           </el-button>
           <el-button v-if="row.statusKey === 'paying'" size="small" @click="handleMockCallback(row.id, 'success')">
             模拟回调成功

@@ -23,6 +23,7 @@ export const orderApi = {
   list: () => request.get('/order/list'),
   detail: (id: string) => request.get(`/order/${id}`),
   trace: (id: string) => request.get(`/order/trace/${id}`),
+  cancel: (id: string) => request.post(`/order/cancel/${id}`),
 }
 
 // ========== 支付服务 ==========
